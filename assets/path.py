@@ -1,0 +1,2 @@
+class ImagePath:
+    PATH = 'assets/'
