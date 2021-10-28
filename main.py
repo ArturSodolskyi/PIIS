@@ -5,18 +5,22 @@ from Entities.brick_wall import BrickWall
 from Entities.side import Side
 from Entities.wall import Wall
 from assets.path import ImagePath
+from collections import deque
+from queue import Queue
 
-SCREEN_HEIGHT = 600
-SCREEN_WIDTH = 800
+TILE = 32
+COLS, ROWS = 25, 20
 
-ENEMIES_COUNT = 7
-WHITE_COLOR = (255, 255, 255)
-BLACK_COLOR = (0, 0, 0)
+SCREEN_HEIGHT = TILE * ROWS
+SCREEN_WIDTH = TILE * COLS
+
+ENEMIES_COUNT = 5
 DELAY_TICKS = 240
 PLAYER_IMAGE = 'player.png'
 ENEMY_IMAGE = 'enemy.png'
 MAX_BULLET_DELAY = 200
-bullet_delay = 0
+BULLET_DELAY = 0
+Z_KEY = 122
 
 pygame.init()
 
@@ -31,44 +35,41 @@ walls = pygame.sprite.Group()
 wallImage = pygame.image.load(ImagePath.PATH + BrickWall.name)
 
 
-def create_borders():
-    for i in range(int(SCREEN_WIDTH / BrickWall.width) + 1):
-        walls.add(Wall(i * BrickWall.height, 0, wallImage))
-        walls.add(Wall(i * BrickWall.height, SCREEN_HEIGHT - BrickWall.height, wallImage))
-    for i in range(int(SCREEN_HEIGHT / BrickWall.height) + 1):
-        walls.add(Wall(0, i * BrickWall.width, wallImage))
-        walls.add(Wall(SCREEN_WIDTH - BrickWall.width, i * BrickWall.width, wallImage))
+def get_rect(x, y):
+    return x * TILE + 1, y * TILE + 1, TILE, TILE
 
 
-def create_obstacles():
-    for i in range(3):
-        walls.add(Wall(SCREEN_HEIGHT / 4 - i * BrickWall.width, SCREEN_HEIGHT / 2, wallImage))
-    for i in range(3):
-        walls.add(Wall(SCREEN_HEIGHT + i * BrickWall.width, SCREEN_HEIGHT / 2, wallImage))
-    for i in range(9):
-        walls.add(Wall(SCREEN_HEIGHT / 4, SCREEN_HEIGHT / 4 + i * BrickWall.width, wallImage))
-    for i in range(9):
-        walls.add(Wall(SCREEN_HEIGHT, SCREEN_HEIGHT / 4 + i * BrickWall.width, wallImage))
-    for i in range(2):
-        walls.add(Wall(SCREEN_HEIGHT / 2 + 2.5 * BrickWall.width, BrickWall.width + i * BrickWall.height, wallImage))
-    for i in range(2):
-        walls.add(Wall(SCREEN_HEIGHT / 2 + 2.5 * BrickWall.width, SCREEN_HEIGHT - 2 * BrickWall.height - i * BrickWall.height, wallImage))
-    for i in range(7):
-        walls.add(Wall(SCREEN_HEIGHT / 2 + 2.5 * BrickWall.width, SCREEN_HEIGHT / 3 + i * BrickWall.width, wallImage))
-    for i in range(9):
-        walls.add(Wall(250 + i * BrickWall.width, SCREEN_HEIGHT / 2, wallImage))
-    walls.add(Wall(70, 70, wallImage))
-    walls.add(Wall(70, SCREEN_HEIGHT - BrickWall.height * 3, wallImage))
-    walls.add(Wall(SCREEN_WIDTH - BrickWall.width * 3, 70, wallImage))
-    walls.add(Wall(SCREEN_WIDTH - BrickWall.width * 3, SCREEN_HEIGHT - BrickWall.height * 3, wallImage))
+def get_next_nodes(x, y):
+    check_next_node = lambda x, y: True if 0 <= x < COLS and 0 <= y < ROWS and not grid[y][x] else False
+    ways = [-1, 0], [0, -1], [1, 0], [0, 1]
+    return [(x + dx, y + dy) for dx, dy in ways if check_next_node(x + dx, y + dy)]
 
 
-def create_walls():
-    create_borders()
-    create_obstacles()
+grid = [[1 if random.random() < 0.2 else 0 for col in range(COLS)] for row in range(ROWS)]
+
+for j in range(COLS):
+    grid[0][j] = 1
+    grid[ROWS - 1][j] = 1
+for j in range(ROWS):
+    grid[j][0] = 1
+    grid[j][COLS - 1] = 1
+
+x_index = 0
+for x in grid:
+    y_index = 0
+    for y in x:
+        if y == 1:
+            walls.add(Wall(y_index * TILE, x_index * TILE, wallImage))
+        y_index += 1
+    x_index += 1
+
+graph = {}
+for y, row in enumerate(grid):
+    for x, col in enumerate(row):
+        if not col:
+            graph[(x, y)] = graph.get((x, y), []) + get_next_nodes(x, y)
 
 
-create_walls()
 all_sprite_list.add(walls)
 walls_and_players.add(walls)
 
@@ -117,8 +118,8 @@ def tank_fire(tank):
 
 
 def enemies_intellect(tank):
-    global bullet_delay
-    if tank.bullet is None and bullet_delay == MAX_BULLET_DELAY:
+    global BULLET_DELAY
+    if tank.bullet is None and BULLET_DELAY == MAX_BULLET_DELAY:
         tank_fire(tank)
     old_x = tank.rect.x
     olx_y = tank.rect.y
@@ -178,17 +179,111 @@ running = True
 end = False
 
 
+alg = True
+
+
 def end_game():
     global running, end
     while not end:
         score = FONT.render("Score : " + str(player.score), True, WHITE_COLOR)
-        screen.fill(BLACK_COLOR)
+        screen.fill(pygame.Color('black'))
         screen.blit(score, (SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2.5))
         pygame.display.update()
         running = False
         for event in pygame.event.get():
             if event.type == pygame.QUIT or event.type == pygame.KEYDOWN:
                 end = True
+
+
+def get_tank_pos(x, y):
+    grid_x, grid_y = x // TILE, y // TILE
+    return (grid_x, grid_y)
+
+
+def bfs(graph, start, goal):
+    queue = deque([start])
+    visited = {start: None}
+
+    while queue:
+        cur_node = queue.popleft()
+        if cur_node == goal:
+            break
+
+        next_nodes = graph[cur_node]
+        for next_node in next_nodes:
+            if next_node not in visited:
+                queue.append(next_node)
+                visited[next_node] = cur_node
+    return visited
+
+
+def ucs(graph, start, goal):
+    visited = set()
+    queue = Queue()
+    queue.put((start, [start]))
+
+    while queue:
+        (cur_node, path) = queue.get()
+        if cur_node not in visited:
+            visited.add(cur_node)
+
+            if cur_node == goal:
+                return path
+            next_nodes = graph[cur_node]
+            for next_node in next_nodes:
+                if next_node not in visited:
+                    queue.put((next_node, path + [next_node]))
+
+
+def dfs(graph, start, goal):
+    stack = [(start, [start])]
+    visited = set()
+    while stack:
+        (cur_node, path) = stack.pop()
+        if cur_node not in visited:
+            if cur_node == goal:
+                return path
+            visited.add(cur_node)
+            for next_node in graph[cur_node]:
+                stack.append((next_node, path + [next_node]))
+
+
+def get_and_draw_path(enemy, alg):
+    start = get_tank_pos(enemy.rect.x, enemy.rect.y)
+    goal = get_tank_pos(player.rect.x, player.rect.y)
+    if alg == 1:
+        bfs_visited = bfs(graph, start, goal)
+        draw_path_bfs(goal, start, bfs_visited)
+    elif alg == 2:
+        dfs_path = dfs(graph, start, goal)
+        draw_path_dfs_or_ucs(goal, start, dfs_path, 'red')
+    else:
+        ucs_path = ucs(graph, start, goal)
+        draw_path_dfs_or_ucs(goal, start, ucs_path, 'orange')
+
+
+def draw_path_bfs(goal, start, visited):
+    path_head, path_segment = goal, goal
+    while path_segment and path_segment in visited:
+        pygame.draw.rect(screen, pygame.Color('green'), get_rect(*path_segment), TILE, border_radius=TILE // 3)
+        path_segment = visited[path_segment]
+    pygame.draw.rect(screen, pygame.Color('blue'), get_rect(*start), border_radius=TILE // 3)
+    pygame.draw.rect(screen, pygame.Color('magenta'), get_rect(*path_head), border_radius=TILE // 3)
+
+
+def draw_path_dfs_or_ucs(goal, start, path, color):
+    for step in path:
+        pygame.draw.rect(screen, pygame.Color(color), get_rect(*step), TILE, border_radius=TILE // 3)
+    pygame.draw.rect(screen, pygame.Color('blue'), get_rect(*start), border_radius=TILE // 3)
+    pygame.draw.rect(screen, pygame.Color('magenta'), get_rect(*goal), border_radius=TILE // 3)
+
+
+def change_alg():
+    global alg
+    if alg == 3:
+        alg = 1
+        return
+    alg += 1
 
 
 while running:
@@ -221,18 +316,24 @@ while running:
                 elif event.key == pygame.K_DOWN:
                     player.change_y_coordinate(player.speed)
 
+                if event.key == Z_KEY:
+                    change_alg()
+
                 if event.key == pygame.K_SPACE and player.bullet is None:
                     tank_fire(player)
     if not end:
-        bullet_delay += 1
+        BULLET_DELAY += 1
         for tank in enemies:
             enemies_intellect(tank)
-        if bullet_delay == MAX_BULLET_DELAY:
-            bullet_delay = 0
+        if BULLET_DELAY == MAX_BULLET_DELAY:
+            BULLET_DELAY = 0
 
         all_sprite_list.update()
 
-        screen.fill(WHITE_COLOR)
+        screen.fill(pygame.Color('white'))
+
+        for enemy in enemies:
+            get_and_draw_path(enemy, alg)
 
         all_sprite_list.draw(screen)
 
