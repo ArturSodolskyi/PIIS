@@ -1,3 +1,5 @@
+from typing import Any
+
 import pygame
 import random
 from Entities.tank import Tank
@@ -9,13 +11,14 @@ from collections import deque
 from queue import Queue
 
 TILE = 32
+COLS: Any
 COLS, ROWS = 25, 20
 
 SCREEN_HEIGHT = TILE * ROWS
 SCREEN_WIDTH = TILE * COLS
 
-ENEMIES_COUNT = 5
-DELAY_TICKS = 240
+ENEMIES_COUNT = 1
+DELAY_TICKS = 50
 PLAYER_IMAGE = 'player.png'
 ENEMY_IMAGE = 'enemy.png'
 MAX_BULLET_DELAY = 200
@@ -45,7 +48,7 @@ def get_next_nodes(x, y):
     return [(x + dx, y + dy) for dx, dy in ways if check_next_node(x + dx, y + dy)]
 
 
-grid = [[1 if random.random() < 0.2 else 0 for col in range(COLS)] for row in range(ROWS)]
+grid = [[1 if random.random() < 0.15 else 0 for col in range(COLS)] for row in range(ROWS)]
 
 for j in range(COLS):
     grid[0][j] = 1
@@ -74,25 +77,25 @@ all_sprite_list.add(walls)
 walls_and_players.add(walls)
 
 
-def create_tank(image_path):
+def create_tank(image_path, player):
     while True:
         x = random.randint(0, SCREEN_WIDTH - BrickWall.width)
         y = random.randint(0, SCREEN_HEIGHT - BrickWall.height)
-        tank = Tank(x, y, image_path, Side.up, walls)
+        tank = Tank(x, y, image_path, Side.up, walls, player)
         collisions = pygame.sprite.spritecollide(tank, all_sprite_list, False)
         if not any(collisions):
             return tank
 
 
 players = pygame.sprite.Group()
-player = create_tank(ImagePath.PATH + PLAYER_IMAGE)
+player = create_tank(ImagePath.PATH + PLAYER_IMAGE, True)
 players.add(player)
 all_sprite_list.add(players)
 walls_and_players.add(players)
 
 enemies = pygame.sprite.Group()
 for i in range(ENEMIES_COUNT):
-    enemy = create_tank(ImagePath.PATH + ENEMY_IMAGE)
+    enemy = create_tank(ImagePath.PATH + ENEMY_IMAGE, False)
     enemy.enemies = players
     enemies.add(enemy)
     all_sprite_list.add(enemy)
@@ -185,7 +188,7 @@ alg = True
 def end_game():
     global running, end
     while not end:
-        score = FONT.render("Score : " + str(player.score), True, WHITE_COLOR)
+        score = FONT.render("Score : " + str(player.score), True, pygame.Color('white'))
         screen.fill(pygame.Color('black'))
         screen.blit(score, (SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2.5))
         pygame.display.update()
@@ -248,6 +251,42 @@ def dfs(graph, start, goal):
                 stack.append((next_node, path + [next_node]))
 
 
+def heuristic(a, b):
+   return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+
+def get_a_star_path(visited, goal):
+    path = []
+    path_head, path_segment = goal, goal
+    while path_segment and path_segment in visited:
+        path.append(path_segment)
+        path_segment = visited[path_segment]
+    return path[::-1]
+
+
+def a_start(graph, start, goal):
+    queue = Queue()
+    queue.put((0, start))
+    cost_visited = {start: 0}
+    visited = {start: None}
+
+    while queue:
+        cur_cost, cur_node = queue.get()
+        if cur_node == goal:
+            break
+
+        next_nodes = graph[cur_node]
+        for next_node in next_nodes:
+            new_cost = cost_visited[cur_node] + 1
+
+            if next_node not in cost_visited or new_cost < cost_visited[next_node]:
+                priority = new_cost + heuristic(next_node, goal)
+                queue.put((priority, next_node))
+                cost_visited[next_node] = new_cost
+                visited[next_node] = cur_node
+    return get_a_star_path(visited, goal)
+
+
 def get_and_draw_path(enemy, alg):
     start = get_tank_pos(enemy.rect.x, enemy.rect.y)
     goal = get_tank_pos(player.rect.x, player.rect.y)
@@ -286,12 +325,143 @@ def change_alg():
     alg += 1
 
 
+def get_click_mouse_pos():
+    x, y = pygame.mouse.get_pos()
+    grid_x, grid_y = x // TILE, y // TILE
+    pygame.draw.rect(screen, pygame.Color('red'), get_rect(grid_x, grid_y))
+    click = pygame.mouse.get_pressed()
+    return (grid_x, grid_y) if click[0] else False
+
+
+def get_side_and_move_tank(tank, tank_pos, goal):
+    if tank_pos[0] != goal[0] and tank_pos[0] < goal[0]:
+        tank.change_x_coordinate(tank.speed)
+    elif tank_pos[0] != goal[0] and tank_pos[0] > goal[0]:
+        tank.change_x_coordinate(-tank.speed)
+    elif tank_pos[1] != goal[1] and tank_pos[1] > goal[1]:
+        tank.change_y_coordinate(-tank.speed)
+    elif tank_pos[1] != goal[1] and tank_pos[1] < goal[1]:
+        tank.change_y_coordinate(tank.speed)
+
+
+def move_tank_by_movements(tank):
+    movement = tank.movements.get()
+    if movement == Side.right:
+        tank.change_x_coordinate(tank.speed)
+    elif movement == Side.left:
+        tank.change_x_coordinate(-tank.speed)
+    elif movement == Side.up:
+        tank.change_y_coordinate(-tank.speed)
+    elif movement == Side.down:
+        tank.change_y_coordinate(tank.speed)
+
+
+def get_movements_by_path(tank_pos, path):
+    queue = Queue()
+    for node in path:
+        x = node[0] * TILE
+        y = node[1] * TILE
+        x_diff = x - tank_pos[0]
+        y_diff = y - tank_pos[1]
+        if x_diff > 0:
+            for i in range(abs(x_diff)):
+                queue.put(Side.right)
+        else:
+            for i in range(abs(x_diff)):
+                queue.put(Side.left)
+
+        if y_diff < 0:
+            for i in range(abs(y_diff)):
+                queue.put(Side.up)
+        else:
+            for i in range(abs(y_diff)):
+                queue.put(Side.down)
+        tank_pos = (x, y)
+    return queue
+
+
+def move_tank_by_path(tank, path):
+    global goal, player_path
+    tank_pos = get_tank_pos(tank.rect.x, tank.rect.y)
+    if tank_pos == goal:
+        goal = None
+        player_path = None
+        player.change_x = 0
+        player.change_y = 0
+        return
+
+    index = 0
+    for node in path:
+        if node == tank_pos:
+            get_side_and_move_tank(tank, tank_pos, path[index + 1])
+            return
+        index += 1
+
+
+def get_forward_nodes_by_side(tank):
+    forward_nodes = []
+    tank_pos = get_tank_pos(tank.rect.x, tank.rect.y)
+    if tank.side == Side.right:
+        for i in range(COLS - tank_pos[0]):
+            if grid[tank_pos[1]][tank_pos[0] + i] == 1:
+                break
+            else:
+                forward_nodes.append((tank_pos[0] + i, tank_pos[1]))
+    elif tank.side == Side.left:
+        for i in range(tank_pos[0]):
+            if grid[tank_pos[1]][tank_pos[0] - i] == 1:
+                break
+            else:
+                forward_nodes.append((tank_pos[0] - i, tank_pos[1]))
+    elif tank.side == Side.up:
+        for i in range(tank_pos[1]):
+            if grid[tank_pos[1] - i][tank_pos[0]] == 1:
+                break
+            else:
+                forward_nodes.append((tank_pos[0], tank_pos[1] - i))
+    elif tank.side == Side.down:
+        for i in range(ROWS - tank_pos[1]):
+            if grid[tank_pos[1] + i][tank_pos[0]] == 1:
+                break
+            else:
+                forward_nodes.append((tank_pos[0], tank_pos[1] + i))
+    return forward_nodes
+
+
+def check_enemy_in_forward_nodes(forward_nodes, enemies):
+    for enemy in enemies:
+        tank_pos = get_tank_pos(enemy.rect.x, enemy.rect.y)
+        for node in forward_nodes:
+            if node == tank_pos:
+                return True
+    return False
+
+
+def random_point():
+    while True:
+        y = random.randint(0, COLS - 1)
+        x = random.randint(0, ROWS - 1)
+        if grid[x][y] == 0:
+            return (x, y)
+
+
+
+# player_start_point = None
+# player_path = None
+player.goal = random_point()
+
+
 while running:
     for tank in tanks:
         if tank.bullet and not tank.bullet.fired:
             all_sprite_list.remove(tank.bullet)
             tank.bullet = None
         check_enemy_kill(tank)
+
+        if not tank.bullet:
+            forward_nodes = get_forward_nodes_by_side(tank)
+            if check_enemy_in_forward_nodes(forward_nodes, tank.enemies):
+                tank_fire(tank)
 
     if not any(enemies) or not any(players):
         end_game()
@@ -323,8 +493,8 @@ while running:
                     tank_fire(player)
     if not end:
         BULLET_DELAY += 1
-        for tank in enemies:
-            enemies_intellect(tank)
+        # for tank in enemies:
+        #     enemies_intellect(tank)
         if BULLET_DELAY == MAX_BULLET_DELAY:
             BULLET_DELAY = 0
 
@@ -332,8 +502,40 @@ while running:
 
         screen.fill(pygame.Color('white'))
 
-        for enemy in enemies:
-            get_and_draw_path(enemy, alg)
+        # mouse_pos = get_click_mouse_pos()
+        # if mouse_pos:
+        #     player.goal = mouse_pos
+
+        for tank in tanks:
+            if tank.movements:
+                tank.change_x = 0
+                tank.change_y = 0
+
+            if tank.movements and not tank.movements.queue:
+                tank.goal = None
+                tank.movements = None
+
+            if not tank.player and tank.goal != get_tank_pos(player.rect.x, player.rect.y):
+                tank.goal = get_tank_pos(player.rect.x, player.rect.y)
+                tank.movements = None
+
+            if tank.goal is not None:
+                if tank.movements is None:
+                    tank_start_point = get_tank_pos(tank.rect.x, tank.rect.y)
+                    path = None
+                    if tank.player:
+                        path = a_start(graph, tank_start_point, tank.goal)
+                    else:
+                        path = ucs(graph, tank_start_point, tank.goal)
+                    path.pop(0)
+                    # if tank.player:
+                    #     player_start_point = tank_start_point
+                    #     player_path = path
+                    tank.movements = get_movements_by_path((tank.rect.x, tank.rect.y), path)
+                # if tank.player:
+                #     draw_path_dfs_or_ucs(tank.goal, player_start_point, player_path, 'orange')
+                if tank.movements.queue:
+                    move_tank_by_movements(tank)
 
         all_sprite_list.draw(screen)
 

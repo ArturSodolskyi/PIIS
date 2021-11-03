@@ -11,12 +11,15 @@ class Tank(pygame.sprite.Sprite):
     image_path = ''
     bullet = None
     enemies = []
+    player = False
+    goal = None
+    movements = None
 
     def rotate_image(self, side):
         path = self.image_path[:(len(self.image_path) - 4)] + '_' + side + self.image_path[(len(self.image_path) - 4):]
         self.image = pygame.image.load(path)
 
-    def __init__(self, x, y, image_path, side, walls):
+    def __init__(self, x, y, image_path, side, walls, player):
         pygame.sprite.Sprite.__init__(self)
         self.image_path = image_path
         self.side = side
@@ -27,6 +30,7 @@ class Tank(pygame.sprite.Sprite):
         self.change_x = 0
         self.change_y = 0
         self.walls = walls
+        self.player = player
 
     def bullet_hit_enemy(self):
         result = self.bullet.bullet_hit_enemy(self.enemies)
