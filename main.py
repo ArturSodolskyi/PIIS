@@ -438,12 +438,12 @@ def check_enemy_in_forward_nodes(forward_nodes, enemies):
 
 
 def random_point():
-    while True:
-        y = random.randint(0, COLS - 1)
-        x = random.randint(0, ROWS - 1)
-        if grid[x][y] == 0:
-            return (x, y)
-
+    rand_y = random.randint(0, COLS - 1)
+    rand_x = random.randint(0, ROWS - 1)
+    if grid[rand_x][rand_y] == 0:
+        return (rand_x, rand_y)
+    else:
+        random_point()
 
 
 # player_start_point = None
