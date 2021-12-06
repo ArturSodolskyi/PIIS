@@ -9,6 +9,9 @@ from Entities.wall import Wall
 from assets.path import ImagePath
 from collections import deque
 from queue import Queue
+import math
+import timeit
+import csv
 
 TILE = 32
 COLS: Any
@@ -24,6 +27,10 @@ ENEMY_IMAGE = 'enemy.png'
 MAX_BULLET_DELAY = 200
 BULLET_DELAY = 0
 Z_KEY = 122
+
+playerAlgorithm = 'minimax'
+
+INFINITY = 1000000000
 
 pygame.init()
 
@@ -185,8 +192,22 @@ end = False
 alg = True
 
 
+def saveStatistic(score, time):
+    winOrLoss = ENEMIES_COUNT == score
+    file = open('Statistics/statistics.csv', 'a', newline='')
+    writer = csv.writer(file)
+    writer.writerow([str(winOrLoss), str(time), str(score), playerAlgorithm])
+    file.close()
+
+
 def end_game():
-    global running, end
+    global running, end, start
+
+    stop = timeit.default_timer()
+    gameTime = stop - start
+
+    saveStatistic(player.score, gameTime)
+
     while not end:
         score = FONT.render("Score : " + str(player.score), True, pygame.Color('white'))
         screen.fill(pygame.Color('black'))
@@ -198,9 +219,9 @@ def end_game():
                 end = True
 
 
-def get_tank_pos(x, y):
+def get_element_pos(x, y):
     grid_x, grid_y = x // TILE, y // TILE
-    return (grid_x, grid_y)
+    return grid_x, grid_y
 
 
 def bfs(graph, start, goal):
@@ -288,8 +309,8 @@ def a_start(graph, start, goal):
 
 
 def get_and_draw_path(enemy, alg):
-    start = get_tank_pos(enemy.rect.x, enemy.rect.y)
-    goal = get_tank_pos(player.rect.x, player.rect.y)
+    start = get_tankget_element_pos_pos(enemy.rect.x, enemy.rect.y)
+    goal = get_element_pos(player.rect.x, player.rect.y)
     if alg == 1:
         bfs_visited = bfs(graph, start, goal)
         draw_path_bfs(goal, start, bfs_visited)
@@ -325,12 +346,115 @@ def change_alg():
     alg += 1
 
 
+def get_movements_by_path(tank_pos, path):
+    queue = Queue()
+    for node in path:
+        x = node[0] * TILE
+        y = node[1] * TILE
+        x_diff = x - tank_pos[0]
+        y_diff = y - tank_pos[1]
+        if x_diff > 0:
+            for i in range(abs(x_diff)):
+                queue.put(Side.right)
+        else:
+            for i in range(abs(x_diff)):
+                queue.put(Side.left)
+
+        if y_diff < 0:
+            for i in range(abs(y_diff)):
+                queue.put(Side.up)
+        else:
+            for i in range(abs(y_diff)):
+                queue.put(Side.down)
+        tank_pos = (x, y)
+    return queue
+
+
 def get_click_mouse_pos():
     x, y = pygame.mouse.get_pos()
     grid_x, grid_y = x // TILE, y // TILE
     pygame.draw.rect(screen, pygame.Color('red'), get_rect(grid_x, grid_y))
     click = pygame.mouse.get_pressed()
     return (grid_x, grid_y) if click[0] else False
+
+
+def getDistance(node1: object, node2: object) -> object:
+    y1 = ROWS - node1[1]
+    y2 = ROWS - node2[1]
+    return math.sqrt(math.pow((node1[0] - node2[0]), 2) + math.pow((y1 - y2), 2))
+
+
+def getClosestEnemyCoordsAndDistance(node):
+    shortestDistance = INFINITY
+    coords = (0, 0)
+
+    for enemy in enemies:
+        enemyNode = get_element_pos(enemy.rect.x, enemy.rect.y)
+        distance = getDistance(node, enemyNode)
+        if distance < shortestDistance:
+            shortestDistance = distance
+            coords = (enemy.rect.x, enemy.rect.y)
+    return coords, shortestDistance
+
+
+def getDistanceToClosestEnemy(node):
+    if node == player.goal:
+        return -INFINITY
+
+    distance = (getClosestEnemyCoordsAndDistance(node))[1]
+    return distance
+    #  return getDistance(node, player.goal)  # for testing
+
+def evaluationFunction(node):
+    return getDistanceToClosestEnemy(node) * -1
+
+
+def minimax(maximizingPlayer, depth, node, alpha, beta):
+    if depth == 3:
+        return evaluationFunction(node)
+    if maximizingPlayer:
+        value = -INFINITY
+        for child in graph[node]:
+            value = max(value, minimax(False, depth, child, alpha, beta))
+            alpha = max(alpha, value)
+            if beta <= alpha:
+                break
+        return value
+    else:
+        value = INFINITY
+        for child in graph[node]:
+            value = min(value, minimax(True, depth + 1, child, alpha, beta))
+            alpha = min(alpha, value)
+            if beta <= alpha:
+                break
+        return value
+
+
+def expectimax(maximizingPlayer, depth, node):
+    if depth == 3:
+        return evaluationFunction(node)
+    if maximizingPlayer:
+        return max(expectimax(False, depth, child) for child in graph[node])
+    else:
+        return sum(expectimax(True, depth + 1, child) for child in graph[node]) / float(len(graph[node]))
+
+
+def getOptimalMovements(x, y):
+    alpha = -INFINITY
+    beta = INFINITY
+
+    node = get_element_pos(x, y)
+    scores = []
+    if playerAlgorithm == 'minimax':
+        scores = [minimax(True, 0, child, alpha, beta) for child in graph[node]]
+    else:
+        scores = [expectimax(True, 0, child) for child in graph[node]]
+
+    index = scores.index(max(scores))
+    optimalNode = (graph[node])[index]
+
+    tankPos = (x, y)
+    return get_movements_by_path(tankPos, [optimalNode])
 
 
 def get_side_and_move_tank(tank, tank_pos, goal):
@@ -356,33 +480,9 @@ def move_tank_by_movements(tank):
         tank.change_y_coordinate(tank.speed)
 
 
-def get_movements_by_path(tank_pos, path):
-    queue = Queue()
-    for node in path:
-        x = node[0] * TILE
-        y = node[1] * TILE
-        x_diff = x - tank_pos[0]
-        y_diff = y - tank_pos[1]
-        if x_diff > 0:
-            for i in range(abs(x_diff)):
-                queue.put(Side.right)
-        else:
-            for i in range(abs(x_diff)):
-                queue.put(Side.left)
-
-        if y_diff < 0:
-            for i in range(abs(y_diff)):
-                queue.put(Side.up)
-        else:
-            for i in range(abs(y_diff)):
-                queue.put(Side.down)
-        tank_pos = (x, y)
-    return queue
-
-
 def move_tank_by_path(tank, path):
     global goal, player_path
-    tank_pos = get_tank_pos(tank.rect.x, tank.rect.y)
+    tank_pos = get_element_pos(tank.rect.x, tank.rect.y)
     if tank_pos == goal:
         goal = None
         player_path = None
@@ -400,7 +500,7 @@ def move_tank_by_path(tank, path):
 
 def get_forward_nodes_by_side(tank):
     forward_nodes = []
-    tank_pos = get_tank_pos(tank.rect.x, tank.rect.y)
+    tank_pos = get_element_pos(tank.rect.x, tank.rect.y)
     if tank.side == Side.right:
         for i in range(COLS - tank_pos[0]):
             if grid[tank_pos[1]][tank_pos[0] + i] == 1:
@@ -430,7 +530,7 @@ def get_forward_nodes_by_side(tank):
 
 def check_enemy_in_forward_nodes(forward_nodes, enemies):
     for enemy in enemies:
-        tank_pos = get_tank_pos(enemy.rect.x, enemy.rect.y)
+        tank_pos = get_element_pos(enemy.rect.x, enemy.rect.y)
         for node in forward_nodes:
             if node == tank_pos:
                 return True
@@ -446,9 +546,7 @@ def random_point():
         random_point()
 
 
-# player_start_point = None
-# player_path = None
-player.goal = random_point()
+start = timeit.default_timer()
 
 
 while running:
@@ -502,11 +600,11 @@ while running:
 
         screen.fill(pygame.Color('white'))
 
-        # mouse_pos = get_click_mouse_pos()
-        # if mouse_pos:
-        #     player.goal = mouse_pos
+        mouse_pos = get_click_mouse_pos()
+        if mouse_pos:
+            player.goal = mouse_pos
 
-        for tank in tanks:
+        for tank in players:
             if tank.movements:
                 tank.change_x = 0
                 tank.change_y = 0
@@ -515,25 +613,55 @@ while running:
                 tank.goal = None
                 tank.movements = None
 
-            if not tank.player and tank.goal != get_tank_pos(player.rect.x, player.rect.y):
-                tank.goal = get_tank_pos(player.rect.x, player.rect.y)
+            tankPos = (tank.rect.x, tank.rect.y)
+            tankPosInGrid = get_element_pos(tankPos[0], tankPos[1])
+
+            if playerAlgorithm != 'minimax' and playerAlgorithm != 'expectimax':
+                coords = (getClosestEnemyCoordsAndDistance(tankPosInGrid))[0]
+                enemyPos = get_element_pos(coords[0], coords[1])
+                if enemyPos != tank.goal:
+                    tank.goal = enemyPos
+                    tank.movements = None
+
+            if tank.movements is None:
+                if playerAlgorithm == 'minimax' or playerAlgorithm == 'expectimax':
+                    tank.movements = getOptimalMovements(tankPos[0], tankPos[1])
+                elif playerAlgorithm == 'bfs':
+                    path = bfs(graph, tankPosInGrid, tank.goal)
+                    tank.movements = get_movements_by_path(tankPos, path)
+                elif playerAlgorithm == 'dfs':
+                    path = dfs(graph, tankPosInGrid, tank.goal)
+                    tank.movements = get_movements_by_path(tankPos, path)
+                elif playerAlgorithm == 'ucs':
+                    path = ucs(graph, tankPosInGrid, tank.goal)
+                    path.pop(0)
+                    tank.movements = get_movements_by_path(tankPos, path)
+                else:
+                    path = a_start(graph, tankPosInGrid, tank.goal)
+                    tank.movements = get_movements_by_path(tankPos, path)
+            if tank.movements.queue:
+                move_tank_by_movements(tank)
+
+        for tank in enemies:
+            if tank.movements:
+                tank.change_x = 0
+                tank.change_y = 0
+
+            if tank.movements and not tank.movements.queue:
+                tank.goal = None
+                tank.movements = None
+
+            if tank.goal != get_element_pos(player.rect.x, player.rect.y):
+                tank.goal = get_element_pos(player.rect.x, player.rect.y)
                 tank.movements = None
 
             if tank.goal is not None:
                 if tank.movements is None:
-                    tank_start_point = get_tank_pos(tank.rect.x, tank.rect.y)
+                    tank_start_point = get_element_pos(tank.rect.x, tank.rect.y)
                     path = None
-                    if tank.player:
-                        path = a_start(graph, tank_start_point, tank.goal)
-                    else:
-                        path = ucs(graph, tank_start_point, tank.goal)
+                    path = ucs(graph, tank_start_point, tank.goal)
                     path.pop(0)
-                    # if tank.player:
-                    #     player_start_point = tank_start_point
-                    #     player_path = path
                     tank.movements = get_movements_by_path((tank.rect.x, tank.rect.y), path)
-                # if tank.player:
-                #     draw_path_dfs_or_ucs(tank.goal, player_start_point, player_path, 'orange')
                 if tank.movements.queue:
                     move_tank_by_movements(tank)
 

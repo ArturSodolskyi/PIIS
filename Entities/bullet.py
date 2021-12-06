@@ -4,7 +4,7 @@ from Entities.side import Side
 
 class Bullet(pygame.sprite.Sprite):
     side = ''
-    speed = 5
+    speed = 3
     fired = True
 
     def bullet_init(self, x, y):
