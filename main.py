@@ -12,6 +12,8 @@ from queue import Queue
 import math
 import timeit
 import csv
+import MyAgent
+import MyExperiment
 
 TILE = 32
 COLS: Any
@@ -439,7 +441,6 @@ for i in range(50):
         beta = INFINITY
 
         node = get_element_pos(x, y)
-        scores = []
         if playerAlgorithm == 'minimax':
             scores = [minimax(True, 0, child, alpha, beta) for child in graph[node]]
         else:
@@ -540,6 +541,16 @@ for i in range(50):
         else:
             random_point()
 
+    def moveBySide(side):
+        if side == Side.right:
+            player.change_x_coordinate(player.speed)
+        elif side == Side.left:
+            player.change_x_coordinate(-player.speed)
+        elif side == Side.up:
+            player.change_y_coordinate(-player.speed)
+        elif side == Side.down:
+            player.change_y_coordinate(player.speed)
+
 
     start = timeit.default_timer()
 
@@ -585,8 +596,6 @@ for i in range(50):
                         tank_fire(player)
         if not end:
             BULLET_DELAY += 1
-            # for tank in enemies:
-            #     enemies_intellect(tank)
             if BULLET_DELAY == MAX_BULLET_DELAY:
                 BULLET_DELAY = 0
 
@@ -599,43 +608,45 @@ for i in range(50):
                 player.goal = mouse_pos
 
             for tank in players:
-                if tank.movements:
-                    tank.change_x = 0
-                    tank.change_y = 0
+                tank.change_x = 0
+                tank.change_y = 0
 
-                if tank.movements and not tank.movements.queue:
-                    tank.goal = None
-                    tank.movements = None
-
-                tankPos = (tank.rect.x, tank.rect.y)
-                tankPosInGrid = get_element_pos(tankPos[0], tankPos[1])
-
-                if playerAlgorithm != 'minimax' and playerAlgorithm != 'expectimax':
-                    coords = (getClosestEnemyCoordsAndDistance(tankPosInGrid))[0]
-                    enemyPos = get_element_pos(coords[0], coords[1])
-                    if enemyPos != tank.goal:
-                        tank.goal = enemyPos
-                        tank.movements = None
-
-                if tank.movements is None:
-                    if playerAlgorithm == 'minimax' or playerAlgorithm == 'expectimax':
-                        tank.movements = getOptimalMovements(tankPos[0], tankPos[1])
-                    elif playerAlgorithm == 'bfs':
-                        path = bfs(graph, tankPosInGrid, tank.goal)
-                        del path[tankPosInGrid]
-                        tank.movements = get_movements_by_path(tankPos, path)
-                    elif playerAlgorithm == 'dfs':
-                        path = dfs(graph, tankPosInGrid, tank.goal)
-                        tank.movements = get_movements_by_path(tankPos, path)
-                    elif playerAlgorithm == 'ucs':
-                        path = ucs(graph, tankPosInGrid, tank.goal)
-                        path.pop(0)
-                        tank.movements = get_movements_by_path(tankPos, path)
-                    else:
-                        path = a_start(graph, tankPosInGrid, tank.goal)
-                        tank.movements = get_movements_by_path(tankPos, path)
-                if tank.movements.queue:
-                    move_tank_by_movements(tank)
+                BestAction = the_agent.Act(game_state)
+                moveBySide(BestAction)
+                #
+                # if tank.movements and not tank.movements.queue:
+                #     tank.goal = None
+                #     tank.movements = None
+                #
+                # tankPos = (tank.rect.x, tank.rect.y)
+                # tankPosInGrid = get_element_pos(tankPos[0], tankPos[1])
+                #
+                # if playerAlgorithm != 'minimax' and playerAlgorithm != 'expectimax':
+                #     coords = (getClosestEnemyCoordsAndDistance(tankPosInGrid))[0]
+                #     enemyPos = get_element_pos(coords[0], coords[1])
+                #     if enemyPos != tank.goal:
+                #         tank.goal = enemyPos
+                #         tank.movements = None
+                #
+                # if tank.movements is None:
+                #     if playerAlgorithm == 'minimax' or playerAlgorithm == 'expectimax':
+                #         tank.movements = getOptimalMovements(tankPos[0], tankPos[1])
+                #     elif playerAlgorithm == 'bfs':
+                #         path = bfs(graph, tankPosInGrid, tank.goal)
+                #         del path[tankPosInGrid]
+                #         tank.movements = get_movements_by_path(tankPos, path)
+                #     elif playerAlgorithm == 'dfs':
+                #         path = dfs(graph, tankPosInGrid, tank.goal)
+                #         tank.movements = get_movements_by_path(tankPos, path)
+                #     elif playerAlgorithm == 'ucs':
+                #         path = ucs(graph, tankPosInGrid, tank.goal)
+                #         path.pop(0)
+                #         tank.movements = get_movements_by_path(tankPos, path)
+                #     else:
+                #         path = a_start(graph, tankPosInGrid, tank.goal)
+                #         tank.movements = get_movements_by_path(tankPos, path)
+                # if tank.movements.queue:
+                #     move_tank_by_movements(tank)
 
             for tank in enemies:
                 if tank.movements:
@@ -663,6 +674,16 @@ for i in range(50):
             all_sprite_list.draw(screen)
 
             pygame.display.flip()
+
+            NextState = CaptureNormalisedState(player.rect.x, player.rect.y, enms)
+
+            the_agent.CaptureSample((game_state, BestAction, 3 - len(ENEMIES), NextState))
+            the_agent.Process()
+            game_state = NextState
+            iteration += 1
+
+            if iteration % 15 == 0:
+                game_history.append((iteration, 3 - len(ENEMIES)))
 
             clock.tick(DELAY_TICKS)
 
