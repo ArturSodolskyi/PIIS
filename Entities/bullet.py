@@ -4,7 +4,6 @@ from Entities.side import Side
 
 class Bullet(pygame.sprite.Sprite):
     side = ''
-    speed = 3
     fired = True
 
     def bullet_init(self, x, y):
@@ -21,7 +20,7 @@ class Bullet(pygame.sprite.Sprite):
             self.rect.x = x + 32
             self.rect.y = y + 13
 
-    def __init__(self, image, side, walls, tank_x, tank_y):
+    def __init__(self, image, side, walls, tank_x, tank_y, speed):
         pygame.sprite.Sprite.__init__(self)
         self.side = side
         self.image = image
@@ -30,6 +29,7 @@ class Bullet(pygame.sprite.Sprite):
         self.change_x = 0
         self.change_y = 0
         self.walls = walls
+        self.speed = speed
 
     def move(self):
         if self.side == Side.up:

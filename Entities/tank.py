@@ -7,9 +7,9 @@ from assets.path import ImagePath
 class Tank(pygame.sprite.Sprite):
     score = 0
     side = ''
-    speed = 1
     image_path = ''
     bullet = None
+
     enemies = []
     player = False
     goal = None
@@ -31,6 +31,8 @@ class Tank(pygame.sprite.Sprite):
         self.change_y = 0
         self.walls = walls
         self.player = player
+        self.speed = 2
+        self.bullet_speed = 3
 
     def bullet_hit_enemy(self):
         result = self.bullet.bullet_hit_enemy(self.enemies)
@@ -42,7 +44,7 @@ class Tank(pygame.sprite.Sprite):
         return self.bullet.bullet_hit_wall(self.walls)
 
     def fire(self):
-        self.bullet = Bullet(pygame.image.load(ImagePath.PATH + 'bullet.png'), self.side, self.walls, self.rect.x, self.rect.y)
+        self.bullet = Bullet(pygame.image.load(ImagePath.PATH + 'bullet.png'), self.side, self.walls, self.rect.x, self.rect.y, self.bullet_speed)
 
     def change_side(self, side):
         self.side = side

@@ -6,6 +6,8 @@ from Entities.side import Side
 from Entities.wall import Wall
 from assets.path import ImagePath
 from queue import Queue
+from console import Console
+
 
 TILE = 32
 COLS, ROWS = 25, 20
@@ -13,17 +15,14 @@ COLS, ROWS = 25, 20
 SCREEN_HEIGHT = TILE * ROWS
 SCREEN_WIDTH = TILE * COLS
 
-screen = pygame.display.set_mode([SCREEN_WIDTH, SCREEN_HEIGHT])
-
 ENEMIES_COUNT = 2
-DELAY_TICKS = 1000000
+DELAY_TICKS = 50
 PLAYER_IMAGE = 'player.png'
 ENEMY_IMAGE = 'enemy.png'
 MAX_BULLET_DELAY = 200
 BULLET_DELAY = 0
 
-# FONT = pygame.font.Font('freesansbold.ttf', 108)
-
+screen = None
 all_sprite_list = pygame.sprite.Group()
 walls_and_players = pygame.sprite.Group()
 walls = pygame.sprite.Group()
@@ -35,6 +34,16 @@ grid = None
 graph = {}
 player = None
 tanks = []
+FONT = ''
+
+increasePLayerSpeed = False
+increasePlayerBulletSpeed = False
+decreaseEnemiesSpeed = False
+decreaseEnemiesBulletSpeed = False
+playerIsImmortal = False
+xTwoScore = False
+enemiesWithoutBullets = False
+stopAllEnemies = False
 
 def get_rect(x, y):
     return x * TILE + 1, y * TILE + 1, TILE, TILE
@@ -46,21 +55,19 @@ def get_next_nodes(x, y):
     return [(x + dx, y + dy) for dx, dy in ways if check_next_node(x + dx, y + dy)]
 
 
-def create_tank(image_path, player, x, y):
-    if x is not None and y is not None:
-        return Tank(x, y, image_path, Side.up, walls, player)
+def create_tank(image_path, player):
     while True:
         x = random.randint(0, SCREEN_WIDTH - BrickWall.width)
         y = random.randint(0, SCREEN_HEIGHT - BrickWall.height)
         tank = Tank(x, y, image_path, Side.up, walls, player)
         collisions = pygame.sprite.spritecollide(tank, all_sprite_list, False)
         if not any(collisions):
-            print(x, y)
             return tank
 
 
 def resetGlobals():
-    global grid, walls, wallImage, TILE, graph, all_sprite_list, walls_and_players, player, players, tanks, enemies, clock
+    global grid, walls, wallImage, TILE, graph, all_sprite_list, walls_and_players, player, players, tanks, enemies, \
+        clock, playerIsImmortal, xTwoScore, enemiesWithoutBullets, stopAllEnemies
     all_sprite_list = pygame.sprite.Group()
     walls_and_players = pygame.sprite.Group()
     walls = pygame.sprite.Group()
@@ -72,11 +79,19 @@ def resetGlobals():
     graph = {}
     player = None
     tanks = []
+    playerIsImmortal = False
+    xTwoScore = False
+    enemiesWithoutBullets = False
+    stopAllEnemies = False
     onInit()
 
 
 def onInit():
-    global grid, walls, wallImage, TILE, graph, all_sprite_list, walls_and_players, player, players, tanks, enemies
+    global grid, walls, wallImage, TILE, graph, all_sprite_list, walls_and_players, player, players, tanks, enemies, \
+        FONT, screen
+
+    screen = pygame.display.set_mode([SCREEN_WIDTH, SCREEN_HEIGHT])
+    FONT = pygame.font.Font('freesansbold.ttf', 108)
     grid = list(map(lambda line: list(
         map(lambda x: int(x), line[:-1])), open('defaultMap.txt', 'r')))
 
@@ -97,13 +112,13 @@ def onInit():
     all_sprite_list.add(walls)
     walls_and_players.add(walls)
 
-    player = create_tank(ImagePath.PATH + PLAYER_IMAGE, True, 509, 280)
+    player = create_tank(ImagePath.PATH + PLAYER_IMAGE, True)
     players.add(player)
     all_sprite_list.add(players)
     walls_and_players.add(players)
 
-    for x, y in [(479, 226), (419, 245), (409, 280), (400, 400)]:
-        enemy = create_tank(ImagePath.PATH + ENEMY_IMAGE, False, x, y)
+    for i in range(ENEMIES_COUNT):
+        enemy = create_tank(ImagePath.PATH + ENEMY_IMAGE, False)
         enemy.enemies = players
         enemies.add(enemy)
         all_sprite_list.add(enemy)
@@ -128,16 +143,18 @@ def check_enemy_kill(tank, game):
     if tank.bullet:
         enemy = tank.bullet_hit_enemy()
         if enemy is not None:
-            enemies.remove(enemy)
-            players.remove(enemy)
-            all_sprite_list.remove(enemy)
-            remove_bullet(tank)
-            if tank.player is True:
-                game.score += 1
-        else:
-            result = tank.bullet_hit_wall()
-            if result:
+            if enemy.player is False or enemy.player is True and playerIsImmortal is False:
+                enemies.remove(enemy)
+                players.remove(enemy)
+                all_sprite_list.remove(enemy)
                 remove_bullet(tank)
+                if tank.player is True:
+                    value = 2 if xTwoScore is True else 1
+                    game.score += value
+                return
+        result = tank.bullet_hit_wall()
+        if result:
+            remove_bullet(tank)
 
 
 def get_element_pos(x, y):
@@ -269,7 +286,7 @@ def moveBySide(side):
 
 def opponentsMove(enemies):
     for tank in enemies:
-        if not tank.bullet:
+        if not tank.bullet and enemiesWithoutBullets is False:
             forward_nodes = get_forward_nodes_by_side(tank)
             if check_enemy_in_forward_nodes(forward_nodes, tank.enemies):
                 tank_fire(tank)
@@ -311,7 +328,7 @@ def checkWinOrLoss(game):
         game.win = False
 
 
-def readPlayerMovementsEvents(events, player):
+def readPlayerMovementsEvents(events, player, console):
     for event in events:
         if event.type == pygame.KEYUP:
             if event.key == pygame.K_RIGHT or event.key == pygame.K_LEFT:
@@ -332,6 +349,9 @@ def readPlayerMovementsEvents(events, player):
             if event.key == pygame.K_SPACE and player.bullet is None:
                 tank_fire(player)
 
+            if event.key == pygame.K_k and pygame.KMOD_LCTRL:
+                console.showConsole()
+
 
 def updateDisplay(all_sprite_list):
     all_sprite_list.update()
@@ -341,24 +361,16 @@ def updateDisplay(all_sprite_list):
     clock.tick(DELAY_TICKS)
 
 
-def updatePlayer(action, player):
-    if action == 0:
-        player.change_x_coordinate(player.speed)
-    elif action == 1:
-        player.change_x_coordinate(-player.speed)
-    elif action == 2:
-        player.change_y_coordinate(-player.speed)
-    elif action == 3:
-        player.change_y_coordinate(player.speed)
-    elif action == 4 and player.bullet is None:
-        tank_fire(player)
-
-
-def getEmeniesPos(enemies):
-    res = []
-    for enemy in enemies:
-        res.append((enemy.rect.x, enemy.rect.y))
-    return res
+def showResult(game):
+    end = False
+    while not end:
+        score = FONT.render("Score : " + str(game.score), True, pygame.Color('white'))
+        screen.fill(pygame.Color('black'))
+        screen.blit(score, (SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2.5))
+        pygame.display.update()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT or event.type == pygame.KEYDOWN:
+                end = True
 
 
 class Game:
@@ -373,6 +385,7 @@ class Game:
         self.players = players
         self.enemies = enemies
         self.tanks = tanks
+        self.console = Console(screen, self.all_sprite_list, self)
 
     def InitialDisplay(self):
         all_sprite_list.update()
@@ -381,22 +394,22 @@ class Game:
         pygame.display.flip()
         clock.tick(DELAY_TICKS)
 
-    def PlayNextMove(self, action):
-        updatePlayer(action, self.player)
-        # readPlayerMovementsEvents(pygame.event.get(), self.player)
-        opponentsMove(self.enemies)
+    def PlayNextMove(self):
+        readPlayerMovementsEvents(pygame.event.get(), self.player, self.console)
+        if stopAllEnemies is False:
+            opponentsMove(self.enemies)
         updateDisplay(self.all_sprite_list)
         handleTanksBullets(self)
         checkWinOrLoss(self)
-        return [self.score, self.player.rect.x, self.player.rect.y, getEmeniesPos(self.enemies)]
 
     def Start(self):
         self.InitialDisplay()
 
         running = True
         while running:
-            self.PlayNextMove(0)
+            self.PlayNextMove()
             if self.win is not None:
+                showResult(self)
                 self.Restart()
 
     def Restart(self):
@@ -409,10 +422,77 @@ class Game:
         self.players = players
         self.enemies = enemies
         self.tanks = tanks
+        self.console = Console(screen, self.all_sprite_list, self)
 
-    def getEmeniesPos(self):
-        return getEmeniesPos(self.enemies)
+    def decreaseEnemiesBulletsSpeed(self):
+        global decreaseEnemiesBulletSpeed
+        decreaseEnemiesBulletSpeed = not decreaseEnemiesBulletSpeed
+        value = 2 if decreaseEnemiesBulletSpeed is True \
+            else 3
+        for enemy in enemies:
+            enemy.bullet_speed = value
 
-# game = Game()
-# while True:
-#     game.Start()
+        return 'Enemies speed was reduced' if decreaseEnemiesBulletSpeed is True      \
+            else 'Enemies speed was set to default'
+
+    def decreaseEnemiesSpeed(self):
+        global decreaseEnemiesSpeed
+        decreaseEnemiesSpeed = not decreaseEnemiesSpeed
+        value = 1 if decreaseEnemiesSpeed is True \
+            else 2
+        for enemy in enemies:
+            print(enemy.speed)
+            enemy.speed = value
+            print(enemy.speed)
+
+        return 'Enemies bullet speed was reduced' if decreaseEnemiesSpeed is True \
+            else 'Enemies bullet speed was set to default'
+
+    def increasePlayerSpeed(self):
+        global increasePLayerSpeed
+        increasePLayerSpeed = not increasePLayerSpeed
+        value = 3 if increasePLayerSpeed is True else 2
+        player.speed = value
+        return 'Player speed was increased' if increasePLayerSpeed is True \
+            else 'Player speed was set to default'
+
+    def increasePlayerBulletsSpeed(self):
+        global increasePlayerBulletSpeed
+        increasePlayerBulletSpeed = not increasePlayerBulletSpeed
+        value = 5 if increasePlayerBulletSpeed is True else 3
+        player.bullet_speed = value
+        return 'Player bullet speed was increased' if increasePlayerBulletSpeed is True \
+            else 'Player bullet speed was set to default'
+
+    def xTwoScore(self):
+        global xTwoScore
+        xTwoScore = not xTwoScore
+        return 'X2 Score: ON' if xTwoScore is True \
+            else 'X2 Score: OFF'
+
+    def immortalMode(self):
+        global playerIsImmortal
+        playerIsImmortal = not playerIsImmortal
+        return 'Immortal Mode: ON' if playerIsImmortal is True \
+            else 'Immortal Mode: OFF'
+
+    def enemiesWithoutBullets(self):
+        global enemiesWithoutBullets
+        enemiesWithoutBullets = not enemiesWithoutBullets
+        return 'Enemies without bullets: ON' if enemiesWithoutBullets is True \
+            else 'Enemies without bullets: OFF'
+
+    def stopAllEnemies(self):
+        global stopAllEnemies
+        stopAllEnemies = not stopAllEnemies
+        if stopAllEnemies is True:
+            for enemy in enemies:
+                enemy.change_x = 0
+                enemy.change_y = 0
+        return 'All enemies were stopped' if stopAllEnemies is True \
+            else 'Enemies can move'
+
+
+game = Game()
+while True:
+    game.Start()
